@@ -133,12 +133,13 @@ async function addComparisons(
   }
 
   const accepted = statements.length
+  // Register the user once (INSERT OR IGNORE writes nothing after the first
+  // pick). We deliberately don't bump last_seen on every push — it's write
+  // churn we don't read, and halving writes matters against D1's daily limit.
   statements.push(
     env.DB.prepare(
-      `INSERT INTO users (user_id, collection_id, first_seen, last_seen)
-       VALUES (?,?,?,?)
-       ON CONFLICT(user_id, collection_id)
-       DO UPDATE SET last_seen = excluded.last_seen`,
+      `INSERT OR IGNORE INTO users (user_id, collection_id, first_seen, last_seen)
+       VALUES (?,?,?,?)`,
     ).bind(userId, collectionId, now, now),
   )
   await env.DB.batch(statements)
