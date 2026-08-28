@@ -9,6 +9,12 @@ import { defaultRepository, type RankerRepository } from '../data/repository'
 import { colorFor } from '../data/colors'
 import { getUserId } from './identity'
 import { createCloudSync, type CloudSync } from '../data/cloudSync'
+import {
+  getSyncedIds,
+  markSynced,
+  unmarkSynced,
+  clearSynced,
+} from './syncState'
 
 export interface RankedRow extends RankedItem {
   item: Item
@@ -105,9 +111,19 @@ export function useRankingSession(
       const stored = await repo.getComparisons(collectionId)
       if (!cancelled) {
         setComparisons(stored)
-        // Reconcile with the cloud (idempotent upserts; safe to re-send).
+        // Reconcile with the cloud, but only push comparisons we haven't
+        // already synced — otherwise every page load re-sends the whole log
+        // (one no-op INSERT OR IGNORE per row). markSynced records success so
+        // a failed push is retried next load.
         if (cloud && stored.length > 0) {
-          void cloud.pushComparisons(stored).catch(() => {})
+          const synced = getSyncedIds(collectionId)
+          const unsynced = stored.filter((c) => !synced.has(c.id))
+          if (unsynced.length > 0) {
+            void cloud
+              .pushComparisons(unsynced)
+              .then(() => markSynced(collectionId, unsynced.map((c) => c.id)))
+              .catch(() => {})
+          }
         }
         if (stored.length > 0) {
           // Pick a smart first pair based on the restored history.
@@ -174,7 +190,11 @@ export function useRankingSession(
         }),
       )
       void repo.addComparison(comparison)
-      if (cloud) void cloud.pushComparisons([comparison]).catch(() => {})
+      if (cloud)
+        void cloud
+          .pushComparisons([comparison])
+          .then(() => markSynced(collectionId, [comparison.id]))
+          .catch(() => {})
     },
     [
       collectionId,
@@ -211,13 +231,15 @@ export function useRankingSession(
     if (a && b) setPair([a, b]) // bring the undone pair back up to redo
     setComparisons((prev) => prev.slice(0, -1))
     void repo.deleteComparison(last.id)
+    unmarkSynced(collectionId, last.id)
     if (cloud) void cloud.deleteComparison(last.id).catch(() => {})
-  }, [comparisons, itemsById, repo, cloud])
+  }, [comparisons, itemsById, repo, cloud, collectionId])
 
   const reset = useCallback(() => {
     setComparisons([])
     setPair(randomPair(collection.items))
     void repo.clearComparisons(collectionId)
+    clearSynced(collectionId)
     if (cloud) void cloud.reset().catch(() => {})
   }, [collection.items, collectionId, repo, cloud])
 
