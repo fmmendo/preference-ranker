@@ -115,7 +115,7 @@ function ChoiceCard({
         <img
           src={item.image}
           alt=""
-          loading="lazy"
+          decoding="async"
           className="mb-1 h-28 w-28 rounded-lg object-cover"
           onError={(e) => {
             // Degrade gracefully if the image is missing/broken.
