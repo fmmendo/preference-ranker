@@ -13,8 +13,13 @@ CREATE TABLE IF NOT EXISTS comparisons (
   received_at   INTEGER NOT NULL    -- server epoch ms
 );
 
-CREATE INDEX IF NOT EXISTS idx_cmp_collection ON comparisons(collection_id);
-CREATE INDEX IF NOT EXISTS idx_cmp_user ON comparisons(collection_id, user_id);
+-- No secondary indexes on comparisons: every extra index costs one more
+-- "row written" per insert on D1's daily write quota. The only frequent read
+-- (the aggregate) scans the whole collection and groups regardless, and
+-- collection_id has a single value here so an index on it never narrows the
+-- scan. Delete-by-id uses the primary key; the rare per-user reset can afford a
+-- full scan. (Re-add a (collection_id, user_id) index if per-user reads — e.g.
+-- clustering — ever become hot.)
 
 CREATE TABLE IF NOT EXISTS users (
   user_id       TEXT NOT NULL,
