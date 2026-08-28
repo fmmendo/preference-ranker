@@ -14,6 +14,8 @@ export interface AlbumTrack {
   name: string
   score: number
   isBonus: boolean
+  /** A non-song interlude: listed for completeness, never scored or ranked. */
+  isInterlude?: boolean
   comparisonCount: number
 }
 
@@ -335,10 +337,13 @@ function TrackList({ tracks, color }: { tracks: AlbumTrack[]; color: string }) {
       {tracks.map((track) => (
         <li
           key={track.itemId}
-          className="flex items-center gap-2 py-0.5 text-sm"
+          className={
+            'flex items-center gap-2 py-0.5 text-sm' +
+            (track.isInterlude ? ' opacity-50' : '')
+          }
         >
           <span className="w-5 shrink-0 text-right tabular-nums text-slate-500 dark:text-slate-400">
-            {track.rank}
+            {track.isInterlude ? '' : track.rank}
           </span>
           <span
             className="h-1.5 w-1.5 shrink-0 rounded-full"
@@ -347,16 +352,20 @@ function TrackList({ tracks, color }: { tracks: AlbumTrack[]; color: string }) {
           <span className="text-slate-800 dark:text-slate-200">
             {track.name}
           </span>
-          {track.isBonus ? (
+          {track.isInterlude ? (
+            <span className="rounded bg-slate-200 px-1 text-xs text-slate-600 dark:bg-slate-700 dark:text-slate-300">
+              interlude
+            </span>
+          ) : track.isBonus ? (
             <span className="rounded bg-slate-200 px-1 text-xs text-slate-600 dark:bg-slate-700 dark:text-slate-300">
               bonus
             </span>
           ) : null}
-          {track.comparisonCount === 0 ? (
+          {!track.isInterlude && track.comparisonCount === 0 ? (
             <span className="text-xs text-slate-400">· unranked</span>
           ) : null}
           <span className="ml-auto tabular-nums text-slate-500 dark:text-slate-400">
-            {Math.round(track.score)}
+            {track.isInterlude ? '—' : Math.round(track.score)}
           </span>
         </li>
       ))}

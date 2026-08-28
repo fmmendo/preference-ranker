@@ -92,15 +92,21 @@ export function useRankingSession(
     () => new Map(collection.groups.map((g) => [g.id, g])),
     [collection.groups],
   )
-  const itemIds = useMemo(
-    () => collection.items.map((i) => i.id),
+  // Interludes (Intro, Interlude, …) aren't songs: never compared and never
+  // ranked. They still appear in the album track list (greyed, no score).
+  const rankableItems = useMemo(
+    () => collection.items.filter((i) => i.metadata?.isInterlude !== true),
     [collection.items],
+  )
+  const itemIds = useMemo(
+    () => rankableItems.map((i) => i.id),
+    [rankableItems],
   )
 
   const [comparisons, setComparisons] = useState<Comparison[]>([])
   const [loaded, setLoaded] = useState(false)
   const [pair, setPair] = useState<[Item, Item]>(() =>
-    randomPair(collection.items),
+    randomPair(rankableItems),
   )
 
   // Seed static data on first run, then hydrate the comparison log.
@@ -130,7 +136,7 @@ export function useRankingSession(
           const restored = replayComparisons(itemIds, stored, seedDate, config)
           setPair(
             selectPair({
-              items: collection.items,
+              items: rankableItems,
               ratings: restored,
               comparisons: stored,
               weights,
@@ -148,6 +154,7 @@ export function useRankingSession(
     repo,
     collection,
     collectionId,
+    rankableItems,
     itemIds,
     seedDate,
     config,
@@ -182,7 +189,7 @@ export function useRankingSession(
       setComparisons(nextComparisons)
       setPair(
         selectPair({
-          items: collection.items,
+          items: rankableItems,
           ratings: nextRatings,
           comparisons: nextComparisons,
           weights,
@@ -198,7 +205,7 @@ export function useRankingSession(
     },
     [
       collectionId,
-      collection.items,
+      rankableItems,
       comparisons,
       itemIds,
       seedDate,
@@ -214,14 +221,14 @@ export function useRankingSession(
   const skip = useCallback(() => {
     setPair(
       selectPair({
-        items: collection.items,
+        items: rankableItems,
         ratings,
         comparisons,
         weights,
         avoidPairKeys: recentPairKeys(comparisons, avoidWindow),
       }),
     )
-  }, [collection.items, ratings, comparisons, weights, avoidWindow])
+  }, [rankableItems, ratings, comparisons, weights, avoidWindow])
 
   const undo = useCallback(() => {
     if (comparisons.length === 0) return
@@ -237,11 +244,11 @@ export function useRankingSession(
 
   const reset = useCallback(() => {
     setComparisons([])
-    setPair(randomPair(collection.items))
+    setPair(randomPair(rankableItems))
     void repo.clearComparisons(collectionId)
     clearSynced(collectionId)
     if (cloud) void cloud.reset().catch(() => {})
-  }, [collection.items, collectionId, repo, cloud])
+  }, [rankableItems, collectionId, repo, cloud])
 
   const ranking = useMemo<RankedRow[]>(() => {
     return generateRanking([...ratings.values()]).map((ranked) => {

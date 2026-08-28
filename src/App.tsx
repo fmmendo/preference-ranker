@@ -139,6 +139,20 @@ function RankerApp({
     [collection.items],
   )
 
+  // Interludes are ranked nowhere (comparisons, song leaderboard, album score);
+  // they only appear as greyed rows in the album track list.
+  const rankableItemIds = useMemo(
+    () =>
+      collection.items
+        .filter((i) => i.metadata?.isInterlude !== true)
+        .map((i) => i.id),
+    [collection.items],
+  )
+  const interludeItems = useMemo(
+    () => collection.items.filter((i) => i.metadata?.isInterlude === true),
+    [collection.items],
+  )
+
   const groupOf = (item: Item): Group | undefined =>
     item.groupId ? groupById.get(item.groupId) : undefined
 
@@ -190,16 +204,16 @@ function RankerApp({
       return { rows: [] as DefinitiveRow[], unranked: 0 }
     }
     const results = getModel('bradley-terry').rank(
-      collection.items.map((i) => i.id),
+      rankableItemIds,
       session.comparisons,
     )
     const rows = toDefinitiveRows(results)
-    return { rows, unranked: collection.items.length - rows.length }
+    return { rows, unranked: rankableItemIds.length - rows.length }
   }, [
     rankMode,
     rankScope,
     toDefinitiveRows,
-    collection.items,
+    rankableItemIds,
     session.comparisons,
   ])
 
@@ -208,11 +222,8 @@ function RankerApp({
   const crowdResults = useMemo<ModelResult[]>(() => {
     if (aggregate.status !== 'ready' || !aggregate.data) return []
     const log = expandTalliesToLog(aggregate.data.pairs)
-    return getModel('bradley-terry').rank(
-      collection.items.map((i) => i.id),
-      log,
-    )
-  }, [aggregate.status, aggregate.data, collection.items])
+    return getModel('bradley-terry').rank(rankableItemIds, log)
+  }, [aggregate.status, aggregate.data, rankableItemIds])
 
   const crowdTotalComparisons = aggregate.data
     ? aggregate.data.pairs.reduce((s, p) => s + p.aWins + p.bWins, 0)
@@ -267,6 +278,23 @@ function RankerApp({
         )
       }
 
+      // Interludes aren't scored or ranked, but still list them (greyed) at the
+      // foot of their album so the tracklist reads complete.
+      for (const item of interludeItems) {
+        const gid = item.groupId ?? ''
+        const list = tracksByGroup.get(gid) ?? []
+        list.push({
+          rank: 0,
+          itemId: item.id,
+          name: item.name,
+          score: 0,
+          isBonus: false,
+          isInterlude: true,
+          comparisonCount: 0,
+        })
+        tracksByGroup.set(gid, list)
+      }
+
       const rows = aggregateByGroup(members, ALBUM_TOP_N).map((g) => {
         const group = groupById.get(g.groupId)
         return {
@@ -289,7 +317,7 @@ function RankerApp({
         tracksByGroup,
       }
     },
-    [session.itemsById, groupById, includeBonus, albumSort],
+    [session.itemsById, groupById, includeBonus, albumSort, interludeItems],
   )
 
   // Album view for the active scope (only on the Albums tab).
@@ -303,7 +331,7 @@ function RankerApp({
 
     const model = albumMode === 'definitive' ? 'bradley-terry' : 'elo'
     const results = getModel(model).rank(
-      collection.items.map((i) => i.id),
+      rankableItemIds,
       session.comparisons,
       eloConfig,
     )
@@ -314,7 +342,7 @@ function RankerApp({
     albumMode,
     buildAlbums,
     crowdResults,
-    collection.items,
+    rankableItemIds,
     session.comparisons,
     eloConfig,
   ])
