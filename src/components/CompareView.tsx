@@ -118,8 +118,23 @@ function ChoiceCard({
           decoding="async"
           className="mb-1 h-28 w-28 rounded-lg object-cover"
           onError={(e) => {
-            // Degrade gracefully if the image is missing/broken.
-            e.currentTarget.style.display = 'none'
+            // A transient CDN cache-miss shouldn't permanently blank a cover
+            // (onError otherwise sticks until the element remounts). Retry a
+            // couple of times with a cache-busting param, then give up quietly.
+            const img = e.currentTarget
+            const tries = Number(img.dataset.retry ?? '0')
+            if (tries < 2) {
+              img.dataset.retry = String(tries + 1)
+              const base = img.src.split('?')[0]
+              setTimeout(
+                () => {
+                  img.src = `${base}?retry=${tries + 1}`
+                },
+                400 * (tries + 1),
+              )
+            } else {
+              img.style.display = 'none'
+            }
           }}
         />
       ) : null}
