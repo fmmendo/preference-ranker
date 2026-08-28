@@ -2,6 +2,10 @@
 --   npx wrangler d1 execute preference-ranker --remote --file worker/schema.sql -c worker/wrangler.toml
 -- (drop --remote to seed the local dev DB instead)
 
+-- WITHOUT ROWID: `id` is the table's clustering key, so there's no separate
+-- rowid btree + PK index (which would be two "rows written" per insert on D1's
+-- write quota) — an insert writes a single row. Idempotent INSERT OR IGNORE and
+-- delete-by-id use the primary key as usual.
 CREATE TABLE IF NOT EXISTS comparisons (
   id            TEXT PRIMARY KEY,   -- client uuid → idempotent upserts
   collection_id TEXT NOT NULL,      -- e.g. 'col:muse'
@@ -11,7 +15,7 @@ CREATE TABLE IF NOT EXISTS comparisons (
   winner_id     TEXT NOT NULL,
   created_at    INTEGER NOT NULL,   -- client epoch ms
   received_at   INTEGER NOT NULL    -- server epoch ms
-);
+) WITHOUT ROWID;
 
 -- No secondary indexes on comparisons: every extra index costs one more
 -- "row written" per insert on D1's daily write quota. The only frequent read
