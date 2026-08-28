@@ -1,16 +1,112 @@
 import type { Stats } from '../engine/stats'
-import type { DatasetLabelSet } from './RankingsView'
+import type { DatasetLabelSet, RankingScope } from './RankingsView'
 
-interface StatsViewProps {
-  stats: Stats
-  labels: DatasetLabelSet
+export interface StatsCrowdMeta {
+  status: 'idle' | 'loading' | 'ready' | 'error'
+  users: number
+  totalComparisons: number
+  onRefresh: () => void
 }
 
-export function StatsView({ stats, labels }: StatsViewProps) {
-  if (stats.totalComparisons === 0) {
+interface StatsViewProps {
+  /** Stats for the active scope, or null while unavailable/loading. */
+  stats: Stats | null
+  labels: DatasetLabelSet
+  syncEnabled: boolean
+  scope: RankingScope
+  onScopeChange: (scope: RankingScope) => void
+  crowd: StatsCrowdMeta
+}
+
+export function StatsView({
+  stats,
+  labels,
+  syncEnabled,
+  scope,
+  onScopeChange,
+  crowd,
+}: StatsViewProps) {
+  return (
+    <div className="flex flex-col gap-4">
+      {syncEnabled && (
+        <div className="flex justify-center">
+          <Segmented
+            options={[
+              { value: 'you', label: 'You' },
+              { value: 'everyone', label: 'Everyone' },
+            ]}
+            value={scope}
+            onChange={(v) => onScopeChange(v as RankingScope)}
+          />
+        </div>
+      )}
+
+      {scope === 'everyone' && syncEnabled ? (
+        <CrowdStats stats={stats} labels={labels} crowd={crowd} />
+      ) : (
+        <StatsBody stats={stats} labels={labels} scope="you" />
+      )}
+    </div>
+  )
+}
+
+function CrowdStats({
+  stats,
+  labels,
+  crowd,
+}: {
+  stats: Stats | null
+  labels: DatasetLabelSet
+  crowd: StatsCrowdMeta
+}) {
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex items-center justify-center gap-3 text-xs text-slate-500 dark:text-slate-400">
+        {crowd.status === 'ready' && (
+          <span>
+            {crowd.users} {crowd.users === 1 ? 'person' : 'people'} ·{' '}
+            {crowd.totalComparisons} comparisons
+          </span>
+        )}
+        <button
+          type="button"
+          onClick={crowd.onRefresh}
+          className="underline-offset-4 transition hover:text-slate-800 hover:underline dark:hover:text-slate-200"
+        >
+          Refresh
+        </button>
+      </div>
+
+      {crowd.status === 'loading' || crowd.status === 'idle' ? (
+        <p className="text-center text-slate-500 dark:text-slate-400">
+          Loading the crowd’s stats…
+        </p>
+      ) : crowd.status === 'error' ? (
+        <p className="text-center text-slate-500 dark:text-slate-400">
+          Couldn’t load the crowd stats. Try Refresh.
+        </p>
+      ) : (
+        <StatsBody stats={stats} labels={labels} scope="everyone" />
+      )}
+    </div>
+  )
+}
+
+function StatsBody({
+  stats,
+  labels,
+  scope,
+}: {
+  stats: Stats | null
+  labels: DatasetLabelSet
+  scope: RankingScope
+}) {
+  if (!stats || stats.totalComparisons === 0) {
     return (
       <p className="text-center text-slate-500 dark:text-slate-400">
-        No comparisons yet — stats will appear as you rank.
+        {scope === 'everyone'
+          ? 'No pooled comparisons yet — stats will appear as the crowd ranks.'
+          : 'No comparisons yet — stats will appear as you rank.'}
       </p>
     )
   }
@@ -50,9 +146,9 @@ export function StatsView({ stats, labels }: StatsViewProps) {
       </section>
 
       <p className="text-xs text-slate-500 dark:text-slate-400">
-        Convergence rises as low-confidence {labels.itemPlural.toLowerCase()}{' '}
-        get surfaced for more comparisons. “Est. remaining” assumes ~8
-        comparisons per {labels.item.toLowerCase()}.
+        {scope === 'everyone'
+          ? `Pooled across everyone who has ranked. Confidence rises as ${labels.itemPlural.toLowerCase()} get more comparisons.`
+          : `Convergence rises as low-confidence ${labels.itemPlural.toLowerCase()} get surfaced for more comparisons. “Est. remaining” assumes ~8 comparisons per ${labels.item.toLowerCase()}.`}
       </p>
     </div>
   )
@@ -107,6 +203,37 @@ function ConfidenceHistogram({
         </div>
       ))}
       <span className="sr-only">{total} songs total</span>
+    </div>
+  )
+}
+
+function Segmented<T extends string>({
+  options,
+  value,
+  onChange,
+}: {
+  options: { value: T; label: string }[]
+  value: T
+  onChange: (value: T) => void
+}) {
+  return (
+    <div className="inline-flex gap-1 rounded-lg bg-slate-100 p-1 text-sm dark:bg-slate-800">
+      {options.map((opt) => (
+        <button
+          key={opt.value}
+          type="button"
+          onClick={() => onChange(opt.value)}
+          aria-current={value === opt.value}
+          className={
+            'rounded-md px-3 py-1 font-medium transition ' +
+            (value === opt.value
+              ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-950 dark:text-slate-100'
+              : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200')
+          }
+        >
+          {opt.label}
+        </button>
+      ))}
     </div>
   )
 }

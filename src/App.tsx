@@ -24,11 +24,12 @@ import { colorFor } from './data/colors'
 import { getModel, type ModelResult } from './engine/model'
 import { aggregateByGroup, type GroupMember } from './engine/aggregation'
 import { computeStats } from './engine/stats'
+import { confidenceFromCount } from './engine/elo'
 import { loadCollection } from './data/loadCollection'
 import { expandTalliesToLog } from './data/cloudSync'
 import type { BuiltCollection } from './data/buildCollection'
 import type { RankerRepository } from './data/repository'
-import type { Group, Item } from './domain/types'
+import type { Group, Item, Rating } from './domain/types'
 
 type Tab = 'compare' | 'rankings' | 'albums' | 'stats'
 
@@ -106,12 +107,14 @@ function RankerApp({
   const [albumScope, setAlbumScope] = useState<RankingScope>('you')
   const [albumSort, setAlbumSort] = useState<AlbumSort>('mean')
   const [includeBonus, setIncludeBonus] = useState(false)
+  const [statsScope, setStatsScope] = useState<RankingScope>('you')
 
   // Crowd aggregate, fetched only while an "Everyone" view is showing.
   const aggregate = useAggregate(
     session.cloud,
     (tab === 'rankings' && rankScope === 'everyone') ||
-      (tab === 'albums' && albumScope === 'everyone'),
+      (tab === 'albums' && albumScope === 'everyone') ||
+      (tab === 'stats' && statsScope === 'everyone'),
   )
 
   const groupById = useMemo(
@@ -324,12 +327,29 @@ function RankerApp({
   }
 
   const stats = useMemo(() => {
-    if (tab !== 'stats') return null
+    if (tab !== 'stats' || statsScope !== 'you') return null
     return computeStats(
       session.ranking.map((row) => row.rating),
       session.totalComparisons,
     )
-  }, [tab, session.ranking, session.totalComparisons])
+  }, [tab, statsScope, session.ranking, session.totalComparisons])
+
+  // Crowd-wide stats, from the pooled tallies. Confidence is the same count
+  // proxy as the personal view, so the two scopes are directly comparable.
+  const crowdStats = useMemo(() => {
+    if (tab !== 'stats' || statsScope !== 'everyone') return null
+    if (aggregate.status !== 'ready') return null
+    const ratings: Rating[] = crowdResults.map((r) => ({
+      itemId: r.itemId,
+      score: r.score,
+      confidence: confidenceFromCount(r.comparisonCount),
+      wins: 0,
+      losses: 0,
+      comparisonCount: r.comparisonCount,
+      lastUpdated: '',
+    }))
+    return computeStats(ratings, crowdTotalComparisons)
+  }, [tab, statsScope, aggregate.status, crowdResults, crowdTotalComparisons])
 
   const comparisonLabel = `${session.totalComparisons} comparison${
     session.totalComparisons === 1 ? '' : 's'
@@ -439,7 +459,19 @@ function RankerApp({
           global={albumsGlobal}
         />
       ) : (
-        stats && <StatsView stats={stats} labels={labels} />
+        <StatsView
+          syncEnabled={session.cloud !== null}
+          scope={statsScope}
+          onScopeChange={setStatsScope}
+          stats={statsScope === 'everyone' ? crowdStats : stats}
+          labels={labels}
+          crowd={{
+            status: aggregate.status,
+            users: aggregate.data?.users ?? 0,
+            totalComparisons: crowdTotalComparisons,
+            onRefresh: aggregate.refresh,
+          }}
+        />
       )}
 
       {session.cloud && (
