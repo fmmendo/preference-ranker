@@ -17,6 +17,12 @@ import {
   type AlbumsGlobalMeta,
 } from './components/AlbumsView'
 import { StatsView } from './components/StatsView'
+import {
+  TasteView,
+  type TraitDatum,
+  type YouVsCrowdDatum,
+} from './components/TasteView'
+import { fitTraitWeights } from './engine/traits'
 import { ThemeToggle } from './components/ThemeToggle'
 import { useTheme } from './session/useTheme'
 import { useAggregate } from './session/useAggregate'
@@ -29,9 +35,9 @@ import { loadCollection } from './data/loadCollection'
 import { expandTalliesToLog } from './data/cloudSync'
 import type { BuiltCollection } from './data/buildCollection'
 import type { RankerRepository } from './data/repository'
-import type { Group, Item, Rating } from './domain/types'
+import type { Group, Id, Item, Rating } from './domain/types'
 
-type Tab = 'compare' | 'rankings' | 'albums' | 'stats'
+type Tab = 'compare' | 'rankings' | 'albums' | 'stats' | 'taste'
 
 const ALBUM_TOP_N = 3
 
@@ -114,7 +120,8 @@ function RankerApp({
     session.cloud,
     (tab === 'rankings' && rankScope === 'everyone') ||
       (tab === 'albums' && albumScope === 'everyone') ||
-      (tab === 'stats' && statsScope === 'everyone'),
+      (tab === 'stats' && statsScope === 'everyone') ||
+      tab === 'taste',
   )
 
   const groupById = useMemo(
@@ -148,6 +155,22 @@ function RankerApp({
         .map((i) => i.id),
     [collection.items],
   )
+
+  // Trait tags (metadata.tags) power the Taste tab's attribute analysis.
+  const tagsById = useMemo(() => {
+    const m = new Map<Id, string[]>()
+    for (const i of collection.items) {
+      const t = i.metadata?.tags
+      if (Array.isArray(t) && t.length) m.set(i.id, t.map(String))
+    }
+    return m
+  }, [collection.items])
+  const tagVocab = useMemo(() => {
+    const s = new Set<string>()
+    for (const tags of tagsById.values()) for (const t of tags) s.add(t)
+    return [...s]
+  }, [tagsById])
+  const hasTags = tagsById.size > 0
   const interludeItems = useMemo(
     () => collection.items.filter((i) => i.metadata?.isInterlude === true),
     [collection.items],
@@ -228,6 +251,45 @@ function RankerApp({
   const crowdTotalComparisons = aggregate.data
     ? aggregate.data.pairs.reduce((s, p) => s + p.aWins + p.bWins, 0)
     : 0
+
+  // Taste tab: crowd trait part-worths (feature-Bradley-Terry over the pooled
+  // log), and the current user's ranking vs the crowd's, per song.
+  const traitResults = useMemo<TraitDatum[]>(() => {
+    if (tab !== 'taste' || aggregate.status !== 'ready' || !aggregate.data)
+      return []
+    const log = expandTalliesToLog(aggregate.data.pairs)
+    return fitTraitWeights(tagsById, tagVocab, log)
+  }, [tab, aggregate.status, aggregate.data, tagsById, tagVocab])
+
+  const youVsCrowd = useMemo<YouVsCrowdDatum[]>(() => {
+    if (tab !== 'taste' || crowdResults.length === 0) return []
+    const personal = getModel('bradley-terry').rank(
+      rankableItemIds,
+      session.comparisons,
+    )
+    const crowdById = new Map(crowdResults.map((r) => [r.itemId, r]))
+    return personal
+      .filter((r) => r.comparisonCount > 0 && crowdById.has(r.itemId))
+      .map((r) => {
+        const item = session.itemsById.get(r.itemId)!
+        const group = item.groupId ? groupById.get(item.groupId) : undefined
+        return {
+          itemId: r.itemId,
+          name: item.name,
+          album: group?.name ?? '',
+          color: group ? colorFor(group.name, group.color) : colorFor(''),
+          you: Math.round(r.score),
+          crowd: Math.round(crowdById.get(r.itemId)!.score),
+        }
+      })
+  }, [
+    tab,
+    crowdResults,
+    rankableItemIds,
+    session.comparisons,
+    session.itemsById,
+    groupById,
+  ])
 
   const globalRows = useMemo<DefinitiveRow[]>(
     () => toDefinitiveRows(crowdResults),
@@ -436,6 +498,11 @@ function RankerApp({
           <TabButton active={tab === 'stats'} onClick={() => setTab('stats')}>
             Stats
           </TabButton>
+          {session.cloud && hasTags && (
+            <TabButton active={tab === 'taste'} onClick={() => setTab('taste')}>
+              Taste
+            </TabButton>
+          )}
         </nav>
       </header>
 
@@ -486,7 +553,7 @@ function RankerApp({
           labels={labels}
           global={albumsGlobal}
         />
-      ) : (
+      ) : tab === 'stats' ? (
         <StatsView
           syncEnabled={session.cloud !== null}
           scope={statsScope}
@@ -499,6 +566,20 @@ function RankerApp({
             totalComparisons: crowdTotalComparisons,
             onRefresh: aggregate.refresh,
           }}
+        />
+      ) : (
+        <TasteView
+          hasTags={hasTags}
+          crowd={{
+            status: aggregate.status,
+            users: aggregate.data?.users ?? 0,
+            totalComparisons: crowdTotalComparisons,
+            onRefresh: aggregate.refresh,
+          }}
+          traits={traitResults}
+          youVsCrowd={youVsCrowd}
+          personalCount={session.totalComparisons}
+          labels={labels}
         />
       )}
 
