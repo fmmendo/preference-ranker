@@ -79,7 +79,7 @@ export default {
           return await resetUser(request, env, collectionId)
         }
         if (sub === 'aggregate' && request.method === 'GET') {
-          return await aggregate(env, collectionId)
+          return await aggregate(request, env, collectionId)
         }
       }
       return json({ error: 'not found' }, 404)
@@ -178,7 +178,20 @@ async function resetUser(
   return json({ ok: true })
 }
 
-async function aggregate(env: Env, collectionId: string): Promise<Response> {
+async function aggregate(
+  request: Request,
+  env: Env,
+  collectionId: string,
+): Promise<Response> {
+  // The crowd aggregate is the single most read-heavy query (a full-table
+  // GROUP BY scan). Edge-cache it briefly so a burst of "Everyone" views
+  // collapses to ~one D1 scan per minute per location instead of one per
+  // visitor. A cache hit reads zero rows from D1.
+  const cache = caches.default
+  const cacheKey = new Request(new URL(request.url).toString(), { method: 'GET' })
+  const cached = await cache.match(cacheKey)
+  if (cached) return cached
+
   // Pool every user's comparisons into per-unordered-pair tallies. The client
   // expands these into a synthetic log and runs the existing Bradley-Terry fit.
   const { results } = await env.DB.prepare(
@@ -209,5 +222,14 @@ async function aggregate(env: Env, collectionId: string): Promise<Response> {
     .bind(collectionId)
     .first<{ n: number }>()
 
-  return json({ pairs, users: userRow?.n ?? 0 })
+  const resp = new Response(JSON.stringify({ pairs, users: userRow?.n ?? 0 }), {
+    headers: {
+      'Content-Type': 'application/json',
+      ...CORS,
+      // 60s edge TTL — crowd rankings shift slowly, so brief staleness is fine.
+      'Cache-Control': 'public, max-age=60',
+    },
+  })
+  await cache.put(cacheKey, resp.clone())
+  return resp
 }
