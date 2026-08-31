@@ -48,7 +48,7 @@ it: labels, colours, the whole UI adapt to your data. No code changes needed.
       "image": "images/neapolitan.jpg", // optional; shown on the compare cards
       "metadata": { "year": 1889 }, // optional; e.g. a year shown by the item
       "items": [
-        { "name": "Margherita" },
+        { "name": "Margherita", "metadata": { "tags": ["classic", "veggie"] } },
         { "name": "Marinara", "metadata": { "isBonus": true } }, // isBonus → excludable in group scores
       ],
     },
@@ -61,6 +61,12 @@ it: labels, colours, the whole UI adapt to your data. No code changes needed.
   no image inherits its group's.
 - The generic app has no notion of "albums" or "songs" — those are just the
   labels your dataset chooses.
+- `metadata.tags` (optional, `string[]`): freeform attribute tags on an item
+  (e.g. musical traits for songs, or features like `ice-dispenser` for
+  appliances). They power attribute-based preference analysis — fitting how much
+  each tag drives a win across the comparison log (conjoint-style part-worths),
+  so you can see *which features people actually prefer*, not just which items.
+  Keep the vocabulary small and reused across items.
 
 ## Develop
 
